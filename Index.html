@@ -149,6 +149,7 @@
                         <h4 class="text-lg font-semibold text-gray-700 mb-2 mt-4">Reward Tiers (Levels/Points)</h4>
                         <div id="reward-tiers-container" class="space-y-3 p-3 bg-indigo-50 rounded-lg">
                             <!-- Tier inputs will be injected here -->
+                            <!-- Dynamic rendering of tiers in JS -->
                         </div>
                         <button type="button" id="add-tier-btn" class="mt-2 w-full text-indigo-600 bg-indigo-100 hover:bg-indigo-200 py-2 rounded-md transition duration-150 text-sm font-medium">
                             + Add Another Reward Tier
@@ -178,7 +179,7 @@
     <!-- Firebase SDK Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, collection, onSnapshot, setDoc, deleteDoc, updateDoc, query, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- GLOBAL VARIABLES & INITIALIZATION ---
@@ -206,7 +207,6 @@
         let unsubscribeTracker = null;
         window.trackerItems = [];
         window.handleSortChange = handleSortChange; // Expose sort function to global scope for HTML inline
-        window.toggleTierComplete = toggleTierComplete; // Expose toggle function
 
         // Sorting state (default: by network name ascending)
         let sortKey = 'network';
@@ -220,17 +220,8 @@
             return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount || 0);
         };
 
-        // *************** CRITICAL CHANGE FOR SHARING ***************
-        // This function now points to the public collection path, making data viewable and editable by anyone
-        const getCollectionRef = () => {
-            if (!db) return null;
-            // Public path: artifacts/{appId}/public/data/reward_tracker
-            return collection(db, `artifacts/${appId}/public/data/reward_tracker`);
-        };
-
         // Function to generate a new reward tier input row
-        const generateTierInput = (tier = '', payout = '', isComplete = false) => {
-            const id = crypto.randomUUID();
+        function generateTierInput(tier = '', payout = '', isComplete = false, id = crypto.randomUUID()) {
             return `
                 <div class="flex space-x-2 tier-row" data-id="${id}" data-complete="${isComplete}">
                     <input type="text" name="tierDescription" value="${tier}" placeholder="e.g., Reach Level 6 / Complete 5 Surveys" class="flex-grow rounded-md border-gray-300 shadow-sm p-2 text-sm" required>
@@ -240,6 +231,14 @@
                     </button>
                 </div>
             `;
+        };
+
+        // *************** CRITICAL: PUBLIC COLLECTION PATH ***************
+        // This function points to the public collection path, making data viewable and editable by anyone
+        const getCollectionRef = () => {
+            if (!db) return null;
+            // Public path: artifacts/{appId}/public/data/reward_tracker
+            return collection(db, `artifacts/${appId}/public/data/reward_tracker`);
         };
 
         // --- SORTING LOGIC ---
@@ -280,24 +279,19 @@
                 if (valA > valB) comparison = 1;
                 else if (valA < valB) comparison = -1;
 
-                // For Payout (Potential), we want Descending by default
-                if (sortKey === 'potential' && sortDirection === 'desc') {
-                    return comparison * -1;
-                }
-                
                 return sortDirection === 'asc' ? comparison : comparison * -1;
             });
 
             return sorted;
         };
 
-        window.handleSortChange = (selectElement) => {
+        const handleSortChange = (selectElement) => {
             const [key, direction] = selectElement.value.split('_');
             sortKey = key;
             sortDirection = direction;
             renderTrackerList(sortItems(window.trackerItems));
         };
-        
+
         // --- RENDER FUNCTIONS ---
 
         const renderTrackerList = (items) => {
@@ -311,12 +305,14 @@
             }
             emptyStateEl.classList.add('hidden');
 
+            const sortedItems = sortItems(items);
+            window.trackerItems = sortedItems; // Update global list with sorted data
+
             const getDifficultyClass = (difficulty) => {
                 return `difficulty-${difficulty.toLowerCase()} px-2 py-0.5 rounded-full text-xs font-semibold`;
             };
 
-            // Use simple iteration over the sorted list for cleaner rendering
-            items.forEach(item => {
+            sortedItems.forEach(item => {
                 const itemTypeIcon = item.type === 'Game' ?
                     `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg>` :
                     `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>`;
@@ -349,7 +345,7 @@
                                 <div class="reward-tier-item flex justify-between items-center p-3 rounded-lg border border-gray-200 cursor-pointer ${reward.isComplete ? 'reward-tier-complete' : 'bg-gray-50 hover:bg-indigo-50'}"
                                     data-item-id="${item.id}"
                                     data-tier-id="${reward.id}"
-                                    onclick="window.toggleTierComplete('${item.id}', '${reward.id}')">
+                                    onclick="toggleTierComplete(this)">
                                     <span class="text-sm font-medium text-gray-700 truncate">${reward.tier}</span>
                                     <span class="text-sm font-bold ${reward.isComplete ? 'text-gray-500' : 'text-green-600'}">${formatCurrency(reward.payoutUSD)}</span>
                                 </div>
@@ -383,268 +379,269 @@
             document.getElementById('total-remaining').textContent = formatCurrency(totalRemaining);
         };
 
-        // --- FIREBASE LISTENERS & CRUD ---
+        // --- FIREBASE DATA LISTENERS ---
 
-        const startTrackerListener = () => {
-            if (unsubscribeTracker) {
-                unsubscribeTracker();
-            }
-            if (!db || !userId) {
-                console.error("Database or User ID not ready for listener.");
+        const fetchTrackerItems = () => {
+            if (!db || !isAuthReady) {
+                console.error("Firebase not initialized or Auth not ready.");
                 return;
             }
 
-            const rewardsQuery = query(getCollectionRef());
+            // Unsubscribe from previous listener if it exists
+            if (unsubscribeTracker) {
+                unsubscribeTracker();
+            }
 
-            unsubscribeTracker = onSnapshot(rewardsQuery, (querySnapshot) => {
-                window.trackerItems = [];
-                querySnapshot.forEach((doc) => {
-                    window.trackerItems.push({ id: doc.id, ...doc.data() });
+            const publicCollectionRef = getCollectionRef();
+            const q = query(publicCollectionRef);
+
+            // Set up real-time listener
+            unsubscribeTracker = onSnapshot(q, (snapshot) => {
+                const newItems = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    // Ensure 'rewards' is an array, falling back to an empty array
+                    const rewards = Array.isArray(data.rewards) ? data.rewards : [];
+                    newItems.push({
+                        id: doc.id,
+                        ...data,
+                        rewards: rewards,
+                    });
                 });
-                
-                const sortedItems = sortItems(window.trackerItems);
-                renderTrackerList(sortedItems);
-                renderSummary(window.trackerItems);
 
-                document.getElementById('loading').classList.add('hidden');
-                document.getElementById('app').classList.remove('hidden');
-
+                window.trackerItems = newItems; // Update global items list
+                renderTrackerList(newItems);
+                renderSummary(newItems);
             }, (error) => {
-                console.error("Error listening to rewards: ", error);
+                console.error("Error listening to Firestore:", error);
+                // Show a user-friendly error message if the listener fails
+                document.getElementById('loading').textContent = `Connection Error. Check Firebase Rules.`;
             });
         };
-        
-        const saveItem = async (data, itemId = null) => {
-            const collectionRef = getCollectionRef();
-            if (!collectionRef) return;
 
+        // --- CRUD OPERATIONS (Simplified for Public Access) ---
+
+        const saveItem = async (itemData, itemId = null) => {
             try {
-                const itemData = {
-                    ...data,
-                    userId: userId, // Attach the user ID
-                    timestamp: serverTimestamp(),
+                if (!db || !userId) throw new Error("Database not ready or user ID missing.");
+
+                const itemToSave = {
+                    ...itemData,
+                    updatedAt: serverTimestamp(),
                 };
 
-                if (itemId) {
-                    await setDoc(doc(collectionRef, itemId), itemData, { merge: true });
-                    // Optional: Update the timestamp on edit
-                    await updateDoc(doc(collectionRef, itemId), { timestamp: serverTimestamp() });
-                } else {
-                    await setDoc(doc(collectionRef), itemData); // Firestore auto-generates ID here
-                }
+                const collectionRef = getCollectionRef();
+                // If we are editing, we merge. If we are adding, we use a new random ID.
+                const docRef = doc(collectionRef, itemId || crypto.randomUUID());
+
+                await setDoc(docRef, {
+                    ...itemToSave,
+                    // Only set createdAt on new documents
+                    ...(itemId ? {} : { createdAt: serverTimestamp() }),
+                }, { merge: true });
+                
+                closeModal();
             } catch (error) {
-                console.error("Error saving item: ", error);
+                console.error("Error saving item:", error);
+                // Note: Using console.warn for user feedback instead of alert()
+                console.warn("Error saving item. Check console for details.");
             }
         };
 
         const deleteItem = async (itemId) => {
-            const collectionRef = getCollectionRef();
-            if (!collectionRef) return;
+            // Replaced alert/confirm with console warning for compatibility
+            console.warn("Attempting to delete item. This action cannot be undone.");
+
             try {
-                await deleteDoc(doc(collectionRef, itemId));
+                if (!db) throw new Error("Database not ready.");
+                const docRef = doc(getCollectionRef(), itemId);
+                await deleteDoc(docRef);
             } catch (error) {
-                console.error("Error deleting item: ", error);
-            }
-        };
-        
-        window.toggleTierComplete = async (itemId, tierId) => {
-            const item = window.trackerItems.find(i => i.id === itemId);
-            if (!item) return;
-
-            // Find the reward tier index
-            const tierIndex = item.rewards.findIndex(r => r.id === tierId);
-            if (tierIndex === -1) return;
-
-            // Toggle the isComplete status
-            const newRewards = [...item.rewards];
-            newRewards[tierIndex].isComplete = !newRewards[tierIndex].isComplete;
-
-            // Update the document in Firestore
-            const itemDocRef = doc(getCollectionRef(), itemId);
-            try {
-                await updateDoc(itemDocRef, { rewards: newRewards });
-            } catch (error) {
-                console.error("Error toggling tier complete status:", error);
+                console.error("Error deleting item:", error);
+                console.warn("Error deleting item. Check console for details.");
             }
         };
 
-        // --- INITIALIZATION & AUTHENTICATION ---
+        window.toggleTierComplete = async (element) => {
+            const itemId = element.dataset.itemId;
+            const tierId = element.dataset.tierId;
 
-        const initializeAppAndAuth = async () => {
             try {
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-                // Set Firestore logging to see debug messages in the console
-                setLogLevel('debug');
+                const item = window.trackerItems.find(i => i.id === itemId);
+                if (!item) throw new Error("Item not found.");
 
-                document.getElementById('user-id').textContent = 'Authenticating...';
+                const rewardIndex = item.rewards.findIndex(r => r.id === tierId);
+                if (rewardIndex === -1) throw new Error("Reward tier not found.");
 
-                // Sign in anonymously since this is a public/sharable app
+                const isComplete = !item.rewards[rewardIndex].isComplete; // Toggle the state
+
+                // Update the local object for Firebase to process
+                const updatedRewards = item.rewards.map((reward, index) => {
+                    if (index === rewardIndex) {
+                        return { ...reward, isComplete: isComplete };
+                    }
+                    return reward;
+                });
+
+                // Update Firestore
+                const docRef = doc(getCollectionRef(), itemId);
+                await updateDoc(docRef, { rewards: updatedRewards, updatedAt: serverTimestamp() });
+
+            } catch (error) {
+                console.error("Error toggling tier completion:", error);
+                console.warn("Error updating completion status. Check console for details.");
+            }
+        };
+
+        // --- FORM AND MODAL LOGIC ---
+
+        const openModal = (item = null) => {
+            const modal = document.getElementById('item-modal');
+            const form = document.getElementById('item-form');
+            const titleEl = document.getElementById('modal-title');
+            const tiersContainer = document.getElementById('reward-tiers-container');
+
+            tiersContainer.innerHTML = '';
+            form.dataset.editingId = item ? item.id : '';
+            titleEl.textContent = item ? 'Edit Tracking Item' : 'Add New Tracking Item';
+
+            if (item) {
+                document.getElementById('network-name').value = item.network || '';
+                document.getElementById('item-name').value = item.itemName || '';
+                document.getElementById('item-type').value = item.type || 'Game';
+                document.getElementById('difficulty').value = item.difficulty || 'Medium';
+                document.getElementById('current-progress').value = item.currentProgress || '';
+
+                if (item.rewards && item.rewards.length > 0) {
+                    item.rewards.forEach(r => {
+                        tiersContainer.insertAdjacentHTML('beforeend', generateTierInput(r.tier, r.payoutUSD, r.isComplete, r.id));
+                    });
+                } else {
+                    tiersContainer.insertAdjacentHTML('beforeend', generateTierInput('', 0, false));
+                }
+
+            } else {
+                // Default for new item
+                form.reset();
+                tiersContainer.insertAdjacentHTML('beforeend', generateTierInput('', 0, false));
+                document.getElementById('difficulty').value = ''; // Force selection
+            }
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        };
+
+        const closeModal = () => {
+            const modal = document.getElementById('item-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        };
+
+        const addEventListeners = () => {
+            document.querySelectorAll('.edit-item-btn').forEach(button => {
+                button.onclick = (e) => {
+                    const itemId = e.currentTarget.dataset.id;
+                    const item = window.trackerItems.find(i => i.id === itemId);
+                    if (item) openModal(item);
+                };
+            });
+
+            document.querySelectorAll('.delete-item-btn').forEach(button => {
+                button.onclick = (e) => {
+                    // Show a message in the console instead of a modal
+                    console.warn(`User confirmed deletion of item ${e.currentTarget.dataset.id}`);
+                    deleteItem(e.currentTarget.dataset.id);
+                };
+            });
+
+            document.getElementById('add-tier-btn').onclick = () => {
+                document.getElementById('reward-tiers-container').insertAdjacentHTML('beforeend', generateTierInput('', 0, false));
+            };
+
+            document.getElementById('reward-tiers-container').onclick = (e) => {
+                if (e.target.classList.contains('remove-tier-btn') || e.target.closest('.remove-tier-btn')) {
+                    const row = e.target.closest('.tier-row');
+                    if (row) row.remove();
+                }
+            };
+        };
+
+        document.getElementById('open-modal-btn').onclick = () => openModal();
+        document.getElementById('close-modal-btn').onclick = () => closeModal();
+
+        document.getElementById('item-form').onsubmit = (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const itemId = form.dataset.editingId || null;
+
+            // Extract all tier data
+            const rewards = Array.from(form.querySelectorAll('.tier-row')).map(row => {
+                const tierInput = row.querySelector('input[name="tierDescription"]').value;
+                const payoutInput = parseFloat(row.querySelector('input[name="payoutAmount"]').value) || 0;
+                return {
+                    id: row.dataset.id || crypto.randomUUID(), // Preserve ID for existing tiers
+                    tier: tierInput,
+                    payoutUSD: payoutInput,
+                    isComplete: row.dataset.complete === 'true' // Convert string back to boolean
+                };
+            });
+
+            const itemData = {
+                network: form.elements['networkName'].value.trim(),
+                itemName: form.elements['itemName'].value.trim(),
+                type: form.elements['itemType'].value,
+                difficulty: form.elements['difficulty'].value,
+                currentProgress: form.elements['currentProgress'].value.trim(),
+                rewards: rewards,
+            };
+
+            saveItem(itemData, itemId);
+        };
+
+        // --- STARTUP LOGIC ---
+
+        const startApp = async () => {
+             // 1. Initialize all services
+            app = initializeApp(firebaseConfig); 
+            db = getFirestore(app);
+            auth = getAuth(app);
+            setLogLevel('debug'); // Enable detailed console logs for debugging
+
+            // 2. Sign in Anonymously
+            try {
+                // Since initialAuthToken is null, we always sign in anonymously for this public app.
                 await signInAnonymously(auth);
 
+                // 3. Wait for Auth State Change
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
                         isAuthReady = true;
+
+                        // Display user ID for sharing/debugging
                         document.getElementById('user-id').textContent = userId;
-                        startTrackerListener();
+
+                        // 4. Start listening to data
+                        fetchTrackerItems();
+
+                        // 5. Hide loading screen and show app
+                        document.getElementById('loading').classList.add('hidden');
+                        document.getElementById('app').classList.remove('hidden');
                     } else {
-                        console.log("No user signed in.");
-                        document.getElementById('user-id').textContent = 'Failed to Authenticate';
-                        document.getElementById('loading').textContent = 'Authentication Failed. Check console.';
+                        // Should not happen if Anonymous sign-in succeeds
+                        isAuthReady = false;
+                        document.getElementById('loading').textContent = "Authentication Failed. Try refreshing.";
                     }
                 });
             } catch (error) {
-                console.error("Firebase Initialization Failed:", error);
-                document.getElementById('loading').textContent = 'Connection Error. See console for details.';
+                console.error("Authentication Error:", error);
+                document.getElementById('loading').textContent = `Fatal Auth Error: ${error.code}`;
             }
         };
 
-        window.onload = initializeAppAndAuth;
-
-        // --- EVENT HANDLERS (MODAL & FORM LOGIC) ---
-        
-        let editingItemId = null; // State to track if we are editing or adding
-
-        const modal = document.getElementById('item-modal');
-        const form = document.getElementById('item-form');
-        const container = document.getElementById('reward-tiers-container');
-        const modalTitle = document.getElementById('modal-title');
-        
-        document.getElementById('open-modal-btn').addEventListener('click', () => {
-            editingItemId = null;
-            modalTitle.textContent = 'Add New Tracking Item';
-            form.reset();
-            container.innerHTML = generateTierInput(); // Start with one empty tier
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-        });
-
-        document.getElementById('close-modal-btn').addEventListener('click', () => {
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-        });
-
-        // Close modal when clicking outside (on the overlay)
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.classList.add('hidden');
-                modal.classList.remove('flex');
-            }
-        });
-
-        // Add tier button handler
-        document.getElementById('add-tier-btn').addEventListener('click', () => {
-            container.insertAdjacentHTML('beforeend', generateTierInput());
-        });
-
-        // Remove tier button handler (uses event delegation since buttons are dynamically added)
-        container.addEventListener('click', (e) => {
-            if (e.target.closest('.remove-tier-btn')) {
-                e.target.closest('.tier-row').remove();
-            }
-        });
-
-        // Form Submission
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const rewards = [];
-            const tierRows = container.querySelectorAll('.tier-row');
-            
-            tierRows.forEach(row => {
-                const tier = row.querySelector('[name="tierDescription"]').value.trim();
-                const payout = parseFloat(row.querySelector('[name="payoutAmount"]').value);
-                
-                if (tier && !isNaN(payout)) {
-                    rewards.push({
-                        id: row.dataset.id || crypto.randomUUID(),
-                        tier: tier,
-                        payoutUSD: payout,
-                        isComplete: row.dataset.complete === 'true'
-                    });
-                }
-            });
-
-            if (rewards.length === 0) {
-                // Use a visual indicator instead of alert()
-                console.error("Please add at least one valid reward tier.");
-                return; 
-            }
-
-            const data = {
-                type: document.getElementById('item-type').value,
-                network: document.getElementById('network-name').value.trim(),
-                itemName: document.getElementById('item-name').value.trim(),
-                difficulty: document.getElementById('difficulty').value,
-                currentProgress: document.getElementById('current-progress').value.trim(),
-                rewards: rewards
-            };
-
-            await saveItem(data, editingItemId);
-            
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-            form.reset();
-        });
-
-        // Event listener setup for dynamic buttons (Edit and Delete)
-        const addEventListeners = () => {
-            // Remove old listeners to prevent duplicates
-            document.querySelectorAll('.edit-item-btn').forEach(btn => btn.removeEventListener('click', handleEditClick));
-            document.querySelectorAll('.delete-item-btn').forEach(btn => btn.removeEventListener('click', handleDeleteClick));
-
-            // Add new listeners
-            document.querySelectorAll('.edit-item-btn').forEach(btn => {
-                btn.addEventListener('click', handleEditClick);
-            });
-
-            document.querySelectorAll('.delete-item-btn').forEach(btn => {
-                btn.addEventListener('click', handleDeleteClick);
-            });
-        };
-
-        const handleEditClick = (e) => {
-            e.stopPropagation();
-            const itemId = e.currentTarget.dataset.id;
-            const item = window.trackerItems.find(i => i.id === itemId);
-
-            if (!item) return;
-
-            editingItemId = itemId;
-            modalTitle.textContent = 'Edit Tracking Item';
-
-            // Populate form fields
-            document.getElementById('item-type').value = item.type;
-            document.getElementById('network-name').value = item.network;
-            document.getElementById('item-name').value = item.itemName;
-            document.getElementById('difficulty').value = item.difficulty;
-            document.getElementById('current-progress').value = item.currentProgress;
-
-            // Populate reward tiers
-            container.innerHTML = '';
-            item.rewards.forEach(reward => {
-                container.insertAdjacentHTML('beforeend', generateTierInput(
-                    reward.tier, 
-                    reward.payoutUSD.toString(), 
-                    reward.isComplete
-                ));
-            });
-            
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-        };
-
-        const handleDeleteClick = (e) => {
-            e.stopPropagation();
-            const itemId = e.currentTarget.dataset.id;
-            // Simple visual indicator for delete confirmation (no alert)
-            if (window.confirm('Are you sure you want to delete this item?')) {
-                 deleteItem(itemId);
-            }
-        };
+        window.onload = startApp;
 
     </script>
 </body>
 </html>
+
